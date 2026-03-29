@@ -1,67 +1,87 @@
 #!/usr/bin/env python3
-"""http_parse - HTTP/1.1 request and response parser."""
+"""http_parse: HTTP request/response parser and builder."""
 import sys
 
-class HttpRequest:
-    def __init__(self, method, path, version, headers, body=""):
-        self.method, self.path, self.version = method, path, version
-        self.headers, self.body = headers, body
-
-class HttpResponse:
-    def __init__(self, version, status, reason, headers, body=""):
-        self.version, self.status, self.reason = version, status, reason
-        self.headers, self.body = headers, body
-
-def parse_request(raw):
-    parts = raw.split("\r\n\r\n", 1)
-    head = parts[0]
-    body = parts[1] if len(parts) > 1 else ""
-    lines = head.split("\r\n")
+def parse_request(data):
+    if isinstance(data, bytes): data = data.decode("utf-8", errors="replace")
+    lines = data.split("\r\n")
     method, path, version = lines[0].split(" ", 2)
     headers = {}
-    for line in lines[1:]:
-        if ": " in line:
-            k, v = line.split(": ", 1)
-            headers[k.lower()] = v
-    return HttpRequest(method, path, version, headers, body)
+    i = 1
+    while i < len(lines) and lines[i]:
+        key, val = lines[i].split(": ", 1)
+        headers[key.lower()] = val
+        i += 1
+    body = "\r\n".join(lines[i+1:]) if i + 1 < len(lines) else ""
+    return {"method": method, "path": path, "version": version, "headers": headers, "body": body}
 
-def parse_response(raw):
-    parts = raw.split("\r\n\r\n", 1)
-    head = parts[0]
-    body = parts[1] if len(parts) > 1 else ""
-    lines = head.split("\r\n")
-    version, status, reason = lines[0].split(" ", 2)
+def parse_response(data):
+    if isinstance(data, bytes): data = data.decode("utf-8", errors="replace")
+    lines = data.split("\r\n")
+    parts = lines[0].split(" ", 2)
+    version = parts[0]
+    status = int(parts[1])
+    reason = parts[2] if len(parts) > 2 else ""
     headers = {}
-    for line in lines[1:]:
-        if ": " in line:
-            k, v = line.split(": ", 1)
-            headers[k.lower()] = v
-    return HttpResponse(version, int(status), reason, headers, body)
+    i = 1
+    while i < len(lines) and lines[i]:
+        key, val = lines[i].split(": ", 1)
+        headers[key.lower()] = val
+        i += 1
+    body = "\r\n".join(lines[i+1:]) if i + 1 < len(lines) else ""
+    return {"version": version, "status": status, "reason": reason, "headers": headers, "body": body}
 
-def build_request(method, path, headers=None, body=""):
+def build_request(method, path, headers=None, body="", version="HTTP/1.1"):
     headers = headers or {}
-    lines = [f"{method} {path} HTTP/1.1"]
+    if body and "content-length" not in {k.lower() for k in headers}:
+        headers["Content-Length"] = str(len(body))
+    lines = [f"{method} {path} {version}"]
     for k, v in headers.items():
         lines.append(f"{k}: {v}")
-    if body:
-        lines.append(f"Content-Length: {len(body)}")
-    return "\r\n".join(lines) + "\r\n\r\n" + body
+    lines.append("")
+    lines.append(body)
+    return "\r\n".join(lines)
+
+def build_response(status, reason="OK", headers=None, body="", version="HTTP/1.1"):
+    headers = headers or {}
+    if body and "content-length" not in {k.lower() for k in headers}:
+        headers["Content-Length"] = str(len(body))
+    lines = [f"{version} {status} {reason}"]
+    for k, v in headers.items():
+        lines.append(f"{k}: {v}")
+    lines.append("")
+    lines.append(body)
+    return "\r\n".join(lines)
+
+def parse_query_string(qs):
+    params = {}
+    for pair in qs.split("&"):
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            params[k] = v
+        elif pair:
+            params[pair] = ""
+    return params
 
 def test():
-    raw = "GET /index.html HTTP/1.1\r\nHost: example.com\r\nAccept: text/html\r\n\r\n"
-    req = parse_request(raw)
-    assert req.method == "GET"
-    assert req.path == "/index.html"
-    assert req.headers["host"] == "example.com"
-    raw_resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<h1>Hi</h1>"
-    resp = parse_response(raw_resp)
-    assert resp.status == 200
-    assert resp.body == "<h1>Hi</h1>"
-    built = build_request("POST", "/api", {"Host": "x.com"}, "data")
-    req2 = parse_request(built)
-    assert req2.method == "POST" and req2.body == "data"
-    assert req2.headers["content-length"] == "4"
-    print("http_parse: all tests passed")
+    req = "GET /index.html HTTP/1.1\r\nHost: example.com\r\nAccept: text/html\r\n\r\n"
+    r = parse_request(req)
+    assert r["method"] == "GET"
+    assert r["path"] == "/index.html"
+    assert r["headers"]["host"] == "example.com"
+    resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 5\r\n\r\nhello"
+    p = parse_response(resp)
+    assert p["status"] == 200
+    assert p["body"] == "hello"
+    assert p["headers"]["content-type"] == "text/html"
+    # Build
+    built = build_request("POST", "/api", {"Content-Type": "application/json"}, '{"a":1}')
+    assert "POST /api HTTP/1.1" in built
+    assert "Content-Length: 7" in built
+    # Query string
+    assert parse_query_string("a=1&b=2&c=hello") == {"a": "1", "b": "2", "c": "hello"}
+    print("All tests passed!")
 
 if __name__ == "__main__":
-    test() if "--test" in sys.argv else print("Usage: http_parse.py --test")
+    if len(sys.argv) > 1 and sys.argv[1] == "test": test()
+    else: print("Usage: http_parse.py test")
