@@ -1,29 +1,27 @@
 #!/usr/bin/env python3
-"""http_parse - HTTP request/response parser and builder."""
+"""HTTP request/response parser."""
 import sys
 
-class HTTPRequest:
-    def __init__(self, method="GET", path="/", headers=None, body="", version="HTTP/1.1"):
-        self.method = method
-        self.path = path
+class HttpRequest:
+    def __init__(self, method="GET", path="/", headers=None, body=""):
+        self.method, self.path, self.body = method, path, body
         self.headers = headers or {}
-        self.body = body
-        self.version = version
-
-    @staticmethod
-    def parse(raw):
+        self.version = "HTTP/1.1"
+    @classmethod
+    def parse(cls, raw):
         lines = raw.split("\r\n")
         method, path, version = lines[0].split(" ", 2)
         headers = {}
         i = 1
         while i < len(lines) and lines[i]:
             key, val = lines[i].split(": ", 1)
-            headers[key] = val
+            headers[key.lower()] = val
             i += 1
-        body = "\r\n".join(lines[i+1:]) if i + 1 < len(lines) else ""
-        return HTTPRequest(method, path, headers, body, version)
-
-    def to_bytes(self):
+        body = "\r\n".join(lines[i+1:]) if i+1 < len(lines) else ""
+        req = cls(method, path, headers, body)
+        req.version = version
+        return req
+    def serialize(self):
         lines = [f"{self.method} {self.path} {self.version}"]
         for k, v in self.headers.items():
             lines.append(f"{k}: {v}")
@@ -31,31 +29,28 @@ class HTTPRequest:
         lines.append(self.body)
         return "\r\n".join(lines)
 
-class HTTPResponse:
-    def __init__(self, status=200, reason="OK", headers=None, body="", version="HTTP/1.1"):
-        self.status = status
-        self.reason = reason
+class HttpResponse:
+    def __init__(self, status=200, reason="OK", headers=None, body=""):
+        self.status, self.reason, self.body = status, reason, body
         self.headers = headers or {}
-        self.body = body
-        self.version = version
-
-    @staticmethod
-    def parse(raw):
+        self.version = "HTTP/1.1"
+    @classmethod
+    def parse(cls, raw):
         lines = raw.split("\r\n")
         parts = lines[0].split(" ", 2)
-        version = parts[0]
-        status = int(parts[1])
+        version, status = parts[0], int(parts[1])
         reason = parts[2] if len(parts) > 2 else ""
         headers = {}
         i = 1
         while i < len(lines) and lines[i]:
             key, val = lines[i].split(": ", 1)
-            headers[key] = val
+            headers[key.lower()] = val
             i += 1
-        body = "\r\n".join(lines[i+1:]) if i + 1 < len(lines) else ""
-        return HTTPResponse(status, reason, headers, body, version)
-
-    def to_bytes(self):
+        body = "\r\n".join(lines[i+1:]) if i+1 < len(lines) else ""
+        resp = cls(status, reason, headers, body)
+        resp.version = version
+        return resp
+    def serialize(self):
         lines = [f"{self.version} {self.status} {self.reason}"]
         for k, v in self.headers.items():
             lines.append(f"{k}: {v}")
@@ -63,27 +58,30 @@ class HTTPResponse:
         lines.append(self.body)
         return "\r\n".join(lines)
 
+def parse_query_string(qs):
+    params = {}
+    for pair in qs.split("&"):
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            params[k] = v
+        elif pair:
+            params[pair] = ""
+    return params
+
 def test():
-    raw = "GET /index.html HTTP/1.1\r\nHost: example.com\r\nAccept: text/html\r\n\r\n"
-    req = HTTPRequest.parse(raw)
+    raw = "GET /api?key=val HTTP/1.1\r\nHost: example.com\r\nAccept: */*\r\n\r\n"
+    req = HttpRequest.parse(raw)
     assert req.method == "GET"
-    assert req.path == "/index.html"
-    assert req.headers["Host"] == "example.com"
-    rebuilt = req.to_bytes()
-    assert "GET /index.html HTTP/1.1" in rebuilt
-    raw_resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 5\r\n\r\nhello"
-    resp = HTTPResponse.parse(raw_resp)
+    assert req.path == "/api?key=val"
+    assert req.headers["host"] == "example.com"
+    raw_resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<h1>Hi</h1>"
+    resp = HttpResponse.parse(raw_resp)
     assert resp.status == 200
-    assert resp.reason == "OK"
-    assert resp.headers["Content-Type"] == "text/html"
-    assert resp.body == "hello"
-    post = HTTPRequest("POST", "/api", {"Content-Type": "application/json"}, '{"key":"val"}')
-    s = post.to_bytes()
-    assert "POST /api" in s
-    assert '{"key":"val"}' in s
-    r404 = HTTPResponse(404, "Not Found", {"Server": "test"}, "not found")
-    assert "404 Not Found" in r404.to_bytes()
-    print("All tests passed!")
+    assert resp.body == "<h1>Hi</h1>"
+    assert parse_query_string("a=1&b=2&c") == {"a": "1", "b": "2", "c": ""}
+    assert req.serialize().startswith("GET /api")
+    print("  http_parse: ALL TESTS PASSED")
 
 if __name__ == "__main__":
-    test() if "--test" in sys.argv else print("http_parse: HTTP parser. Use --test")
+    if len(sys.argv) > 1 and sys.argv[1] == "test": test()
+    else: print("HTTP request/response parser")

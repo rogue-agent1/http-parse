@@ -1,6 +1,10 @@
-# http_parse
-Single-file Python CLI tool. Zero dependencies, Python 3.8+.
+# http-parse
+
+Single-file Python CLI. Zero dependencies.
+
 ## Usage
+
 ```bash
-python3 http_parse.py --test
+python3 http_parse.py
+python3 http_parse.py test
 ```
