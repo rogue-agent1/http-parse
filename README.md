@@ -1,11 +1,6 @@
 # http_parse
-
-http_parse: HTTP request/response parser and builder.
-
-Single-file, zero-dependency Python CLI.
-
+Single-file Python CLI tool. Zero dependencies, Python 3.8+.
 ## Usage
-
 ```bash
-python3 http_parse.py test
+python3 http_parse.py --test
 ```
